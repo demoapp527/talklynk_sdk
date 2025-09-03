@@ -188,7 +188,7 @@ class RoomProvider extends ChangeNotifier {
   void _handleUserJoined(Map<String, dynamic> data) {
     try {
       if (data['room_id'] == _currentRoom?.roomId) {
-        final participant = Participant.fromJson(data['participant'] ?? data);
+        final participant = Participant.fromJson(data['user'] ?? data);
 
         // Check if participant already exists
         final existingIndex = _currentRoomParticipants.indexWhere(

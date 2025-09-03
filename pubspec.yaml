@@ -24,7 +24,7 @@ dependencies:
   permission_handler: ^11.0.1
   
   # WebRTC (you may need to add this)
-  flutter_webrtc: ^0.9.36
+  flutter_webrtc: ^0.9.48+hotfix.1
 
 dev_dependencies:
   flutter_test:

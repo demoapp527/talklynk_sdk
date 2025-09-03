@@ -72,9 +72,7 @@ class EventTypes {
   static const String callEnded = 'call.ended';
 
   // WebRTC events
-  static const String webrtcOffer = 'webrtc.offer';
-  static const String webrtcAnswer = 'webrtc.answer';
-  static const String webrtcIceCandidate = 'webrtc.ice_candidate';
+  static const String webrtcSignal = 'webrtc.signaling';
 
   // Admin events
   static const String adminTransferred = 'admin.transferred';

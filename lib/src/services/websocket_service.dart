@@ -225,7 +225,7 @@ class WebSocketService {
       _logger.d('🔐 Request data: $requestData');
 
       final response = await _dio.post(
-        '/broadcasting/auth',
+        '/api/broadcasting/auth',
         data: requestData,
         options: Options(
           headers: {
@@ -363,6 +363,82 @@ class WebSocketService {
     } else {
       _logger.w('⚠️ Cannot send message: WebSocket not connected');
     }
+  }
+
+  // Add this method to your WebSocketService class
+
+  void subscribeToUserChannel(String userId, String clientId) async {
+    if (!_isConnected) {
+      _logger.w('⚠️ Cannot subscribe: WebSocket not connected');
+      return;
+    }
+
+    final channelName = 'private-client.$clientId.user.$userId';
+
+    if (_subscribedChannels.contains(channelName)) {
+      _logger.d('ℹ️ Already subscribed to user channel: $userId');
+      return;
+    }
+
+    _logger.d(
+        '🚀 Starting subscription to user channel: $userId on channel: $channelName');
+
+    try {
+      // Get authentication data
+      _logger.d('🔐 Getting authentication for user channel...');
+      final authData = await _authenticateChannel(channelName);
+
+      final subscribeData = {
+        'channel': channelName,
+        'auth': authData['auth'],
+      };
+
+      // Add channel_data if provided
+      if (authData.containsKey('channel_data')) {
+        subscribeData['channel_data'] = authData['channel_data'];
+      }
+
+      _logger.d('📡 Sending user channel subscription message: $subscribeData');
+
+      _sendMessage({
+        'event': 'pusher:subscribe',
+        'data': subscribeData,
+      });
+
+      _subscribedChannels.add(channelName);
+      _logger.d('✅ User channel subscription request sent for: $channelName');
+    } catch (e, stackTrace) {
+      _logger.e('💥 Failed to subscribe to user channel: $e');
+      _logger.e('💥 Stack trace: $stackTrace');
+
+      // Emit subscription error
+      _emitEvent('subscription:error', {
+        'user_id': userId,
+        'channel': channelName,
+        'error': e.toString(),
+      });
+    }
+  }
+
+  void unsubscribeFromUserChannel(String userId, String clientId) {
+    if (!_isConnected) return;
+
+    final channelName = 'private-client.$clientId.user.$userId';
+
+    if (!_subscribedChannels.contains(channelName)) {
+      return;
+    }
+
+    _logger.d('📤 Unsubscribing from user channel: $userId');
+
+    _sendMessage({
+      'event': 'pusher:unsubscribe',
+      'data': {
+        'channel': channelName,
+      }
+    });
+
+    _subscribedChannels.remove(channelName);
   }
 
   void _handleMessage(dynamic message) {

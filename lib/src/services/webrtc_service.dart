@@ -1,14 +1,12 @@
 // lib/src/services/webrtc_service.dart
+// Updated to handle unified webrtc.signaling event with type-based routing
 
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:logger/logger.dart';
-import 'package:talklynk_sdk/src/models/call.dart';
-import 'package:talklynk_sdk/src/services/api_service.dart';
-import 'package:talklynk_sdk/src/services/websocket_service.dart';
-import 'package:talklynk_sdk/src/utils/exceptions.dart';
+import 'package:talklynk_sdk/talklynk_sdk.dart';
 
 enum WebRTCConnectionState {
   disconnected,
@@ -100,9 +98,10 @@ class WebRTCService extends ChangeNotifier {
   final RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
 
   // WebSocket Event Subscriptions
-  StreamSubscription? _offerSubscription;
-  StreamSubscription? _answerSubscription;
-  StreamSubscription? _iceCandidateSubscription;
+  StreamSubscription? _signalingSubscription;
+
+  // Store pending ICE candidates
+  final List<RTCIceCandidate> _pendingCandidates = [];
 
   // Default STUN servers (fallback)
   static const List<Map<String, dynamic>> _defaultStunServers = [
@@ -111,6 +110,7 @@ class WebRTCService extends ChangeNotifier {
     {'urls': 'stun:stun2.l.google.com:19302'},
   ];
 
+  // FIXED: Updated configuration for Unified Plan
   static const Map<String, dynamic> _config = {
     'mandatory': {},
     'optional': [
@@ -118,6 +118,7 @@ class WebRTCService extends ChangeNotifier {
     ]
   };
 
+  // FIXED: Updated constraints for Unified Plan
   static const Map<String, dynamic> _constraints = {
     'mandatory': {
       'OfferToReceiveAudio': true,
@@ -177,7 +178,7 @@ class WebRTCService extends ChangeNotifier {
       _isInitialized = true;
       _logger.d('✅ WebRTC service initialized successfully');
     } catch (e, stackTrace) {
-      _logger.e('❌ Failed to initialize WebRTC service');
+      _logger.e('❌ Failed to initialize WebRTC service: $e');
       throw WebRTCException('Failed to initialize WebRTC service: $e');
     }
   }
@@ -207,7 +208,7 @@ class WebRTCService extends ChangeNotifier {
     }
   }
 
-  /// Get ICE servers configuration
+  /// FIXED: Get ICE servers configuration with explicit Unified Plan
   Map<String, dynamic> _getIceServersConfig() {
     final iceServers = <Map<String, dynamic>>[];
 
@@ -219,7 +220,10 @@ class WebRTCService extends ChangeNotifier {
       iceServers.addAll(_turnCredentials!.iceServers);
     }
 
-    return {'iceServers': iceServers};
+    return {
+      'iceServers': iceServers,
+      'sdpSemantics': 'unified-plan', // CRITICAL: Explicitly set Unified Plan
+    };
   }
 
   /// Start a call (caller side)
@@ -236,7 +240,7 @@ class WebRTCService extends ChangeNotifier {
       _currentUserId = userId;
       _remoteUserId = remoteUserId;
       _currentCallType = callType;
-
+      _webSocketService.subscribeToRoom(roomId);
       // Create peer connection
       await _createPeerConnection();
 
@@ -246,7 +250,7 @@ class WebRTCService extends ChangeNotifier {
       // Create and send offer
       await _createOffer();
     } catch (e, stackTrace) {
-      _logger.e('❌ Failed to start call');
+      _logger.e('❌ Failed to start call: $e');
       await _cleanup();
       throw WebRTCException('Failed to start call: $e');
     }
@@ -261,7 +265,7 @@ class WebRTCService extends ChangeNotifier {
   }) async {
     try {
       _logger.d('📞 Answering call - Room: $roomId, Type: ${callType.name}');
-
+      _webSocketService.subscribeToRoom(roomId);
       _currentRoomId = roomId;
       _currentUserId = userId;
       _remoteUserId = remoteUserId;
@@ -275,13 +279,13 @@ class WebRTCService extends ChangeNotifier {
 
       _updateConnectionState(WebRTCConnectionState.connecting);
     } catch (e, stackTrace) {
-      _logger.e('❌ Failed to answer call');
+      _logger.e('❌ Failed to answer call: $e');
       await _cleanup();
       throw WebRTCException('Failed to answer call: $e');
     }
   }
 
-  /// Create peer connection
+  /// FIXED: Create peer connection with proper event handlers
   Future<void> _createPeerConnection() async {
     try {
       _logger.d('🔗 Creating peer connection...');
@@ -291,22 +295,24 @@ class WebRTCService extends ChangeNotifier {
 
       _peerConnection = await createPeerConnection(configuration, _config);
 
-      // Set up event handlers
+      // FIXED: Set up event handlers for Unified Plan
       _peerConnection!.onIceCandidate = _onIceCandidate;
       _peerConnection!.onIceConnectionState = _onIceConnectionState;
-      _peerConnection!.onAddStream = _onAddStream;
+
+      // FIXED: Use onTrack instead of onAddStream for Unified Plan
+      _peerConnection!.onTrack = _onTrack;
       _peerConnection!.onRemoveStream = _onRemoveStream;
       _peerConnection!.onDataChannel = _onDataChannel;
       _peerConnection!.onRenegotiationNeeded = _onRenegotiationNeeded;
 
       _logger.d('✅ Peer connection created successfully');
     } catch (e, stackTrace) {
-      _logger.e('❌ Failed to create peer connection');
+      _logger.e('❌ Failed to create peer connection: $e');
       throw WebRTCException('Failed to create peer connection: $e');
     }
   }
 
-  /// Get user media (camera and microphone)
+  /// FIXED: Get user media and add tracks individually
   Future<void> _getUserMedia(CallType callType) async {
     try {
       _logger.d('🎤 Getting user media for ${callType.name} call...');
@@ -335,8 +341,11 @@ class WebRTCService extends ChangeNotifier {
           await navigator.mediaDevices.getUserMedia(mediaConstraints);
 
       if (_localStream != null) {
-        // Add stream to peer connection
-        await _peerConnection!.addStream(_localStream!);
+        // FIXED: Add tracks individually instead of using addStream
+        for (final track in _localStream!.getTracks()) {
+          await _peerConnection!.addTrack(track, _localStream!);
+          _logger.d('➕ Added ${track.kind} track to peer connection');
+        }
 
         // Set local video
         localRenderer.srcObject = _localStream;
@@ -350,10 +359,10 @@ class WebRTCService extends ChangeNotifier {
               : MediaState.disabled,
         ));
 
-        _logger.d('✅ User media obtained successfully');
+        _logger.d('✅ User media obtained and tracks added successfully');
       }
     } catch (e, stackTrace) {
-      _logger.e('❌ Failed to get user media');
+      _logger.e('❌ Failed to get user media: $e');
       throw WebRTCException('Failed to access camera/microphone: $e');
     }
   }
@@ -380,18 +389,25 @@ class WebRTCService extends ChangeNotifier {
       _updateConnectionState(WebRTCConnectionState.connecting);
       _logger.d('✅ Offer created and sent successfully');
     } catch (e, stackTrace) {
-      _logger.e('❌ Failed to create offer');
+      _logger.e('❌ Failed to create offer: $e');
       throw WebRTCException('Failed to create offer: $e');
     }
   }
 
-  /// Create and send answer
+  /// FIXED: Create and send answer with proper ICE candidate handling
   Future<void> _createAnswer(Map<String, dynamic> offer) async {
     try {
       _logger.d('📤 Creating answer...');
 
       final remoteDesc = RTCSessionDescription(offer['sdp'], offer['type']);
       await _peerConnection!.setRemoteDescription(remoteDesc);
+
+      // FIXED: Add any pending ICE candidates after setting remote description
+      for (final candidate in _pendingCandidates) {
+        await _peerConnection!.addCandidate(candidate);
+        _logger.d('➕ Added pending ICE candidate');
+      }
+      _pendingCandidates.clear();
 
       final answer = await _peerConnection!.createAnswer(_constraints);
       await _peerConnection!.setLocalDescription(answer);
@@ -409,87 +425,182 @@ class WebRTCService extends ChangeNotifier {
 
       _logger.d('✅ Answer created and sent successfully');
     } catch (e, stackTrace) {
-      _logger.e('❌ Failed to create answer');
+      _logger.e('❌ Failed to create answer: $e');
       throw WebRTCException('Failed to create answer: $e');
     }
   }
 
-  /// Setup WebSocket listeners for WebRTC signaling
+  /// UPDATED: Unified WebRTC signaling handler based on type
+  void _handleWebRTCSignaling(Map<String, dynamic> data) {
+    try {
+      _logger.d('🔔 Received WebRTC signaling: $data');
+
+      // Extract signaling type and data
+      final type = data['type'] as String?;
+      final signalingData = data['data'] as Map<String, dynamic>?;
+      final fromUser = data['from_user'] as Map<String, dynamic>?;
+      final toUser = data['to_user'] as Map<String, dynamic>?;
+      final roomId = data['room_id'] as String?;
+
+      if (type == null || signalingData == null) {
+        _logger.w('⚠️ Invalid signaling data: missing type or data');
+        return;
+      }
+
+      // Verify this message is intended for the current user
+      final targetUserId = toUser?['external_id'] ?? toUser?['id'];
+      if (targetUserId != null && targetUserId != _currentUserId) {
+        _logger.d(
+            '📭 Signaling not for current user ($targetUserId != $_currentUserId)');
+        return;
+      }
+
+      // Verify this is for the current room
+      if (roomId != null && roomId != _currentRoomId) {
+        _logger.d(
+            '📭 Signaling not for current room ($roomId != $_currentRoomId)');
+        return;
+      }
+
+      // Route based on signaling type
+      switch (type.toLowerCase()) {
+        case 'offer':
+          _logger.d('📥 Processing WebRTC offer');
+          _handleOffer(signalingData);
+          break;
+
+        case 'answer':
+          _logger.d('📥 Processing WebRTC answer');
+          _handleAnswer(signalingData);
+          break;
+
+        case 'ice_candidate':
+        case 'ice-candidate':
+        case 'candidate':
+          _logger.d('📥 Processing ICE candidate');
+          _handleIceCandidate(signalingData);
+          break;
+
+        default:
+          _logger.w('⚠️ Unknown WebRTC signaling type: $type');
+      }
+    } catch (e, stackTrace) {
+      _logger.e('❌ Failed to handle WebRTC signaling: $e');
+      _logger.e('Stack trace: $stackTrace');
+    }
+  }
+
+  /// UPDATED: Setup WebSocket listeners for unified signaling
   void _setupWebSocketListeners() {
-    _logger.d('🔗 Setting up WebSocket listeners for WebRTC...');
+    _logger
+        .d('🔗 Setting up unified WebSocket listeners for WebRTC signaling...');
 
-    // Listen for WebRTC offers
-    _offerSubscription = _webSocketService
-        .on<Map<String, dynamic>>('webrtc.offer')
+    // Listen for unified webrtc.signaling events
+    _signalingSubscription = _webSocketService
+        .on<Map<String, dynamic>>('webrtc.signaling')
         .listen((data) {
-      _handleOffer(data);
+      _handleWebRTCSignaling(data);
     });
 
-    // Listen for WebRTC answers
-    _answerSubscription = _webSocketService
-        .on<Map<String, dynamic>>('webrtc.answer')
-        .listen((data) {
-      _handleAnswer(data);
-    });
-
-    // Listen for ICE candidates
-    _iceCandidateSubscription = _webSocketService
-        .on<Map<String, dynamic>>('webrtc.ice_candidate')
-        .listen((data) {
-      _handleIceCandidate(data);
-    });
+    _logger.d('✅ WebRTC signaling listener configured');
   }
 
   /// Handle incoming WebRTC offer
   void _handleOffer(Map<String, dynamic> data) async {
     try {
-      _logger.d('📥 Received WebRTC offer');
-      _logger.d('📥 Offer data: $data');
+      _logger.d('📥 Processing offer data: $data');
 
-      final offer = data['offer'];
+      // Extract offer from the data structure
+      Map<String, dynamic>? offer;
+
+      // Handle different possible data structures
+      if (data.containsKey('offer')) {
+        offer = data['offer'] as Map<String, dynamic>?;
+      } else if (data.containsKey('sdp') && data.containsKey('type')) {
+        offer = data;
+      }
+
       if (offer != null && _peerConnection != null) {
         await _createAnswer(offer);
+      } else {
+        _logger.w('⚠️ Invalid offer data structure');
       }
     } catch (e, stackTrace) {
-      _logger.e('❌ Failed to handle offer');
+      _logger.e('❌ Failed to handle offer: $e');
     }
   }
 
-  /// Handle incoming WebRTC answer
+  /// FIXED: Handle incoming WebRTC answer with pending ICE candidates
   void _handleAnswer(Map<String, dynamic> data) async {
     try {
-      _logger.d('📥 Received WebRTC answer');
-      _logger.d('📥 Answer data: $data');
+      _logger.d('📥 Processing answer data: $data');
 
-      final answer = data['answer'];
+      // Extract answer from the data structure
+      Map<String, dynamic>? answer;
+
+      // Handle different possible data structures
+      if (data.containsKey('answer')) {
+        answer = data['answer'] as Map<String, dynamic>?;
+      } else if (data.containsKey('sdp') && data.containsKey('type')) {
+        answer = data;
+      }
+
       if (answer != null && _peerConnection != null) {
         final remoteDesc = RTCSessionDescription(answer['sdp'], answer['type']);
         await _peerConnection!.setRemoteDescription(remoteDesc);
+
+        // FIXED: Add any pending ICE candidates after setting remote description
+        for (final candidate in _pendingCandidates) {
+          await _peerConnection!.addCandidate(candidate);
+          _logger.d('➕ Added pending ICE candidate');
+        }
+        _pendingCandidates.clear();
+
         _logger.d('✅ Remote description set successfully');
+      } else {
+        _logger.w('⚠️ Invalid answer data structure');
       }
     } catch (e, stackTrace) {
-      _logger.e('❌ Failed to handle answer');
+      _logger.e('❌ Failed to handle answer: $e');
     }
   }
 
-  /// Handle incoming ICE candidate
+  /// FIXED: Handle incoming ICE candidate with proper queuing
   void _handleIceCandidate(Map<String, dynamic> data) async {
     try {
-      _logger.d('📥 Received ICE candidate');
-      _logger.d('📥 ICE candidate data: $data');
+      _logger.d('📥 Processing ICE candidate data: $data');
 
-      final candidate = data['candidate'];
+      // Extract candidate from the data structure
+      Map<String, dynamic>? candidate;
+
+      // Handle different possible data structures
+      if (data.containsKey('candidate')) {
+        candidate = data['candidate'] as Map<String, dynamic>?;
+      } else if (data.containsKey('sdpMid') &&
+          data.containsKey('sdpMLineIndex')) {
+        candidate = data;
+      }
+
       if (candidate != null && _peerConnection != null) {
         final iceCandidate = RTCIceCandidate(
           candidate['candidate'],
           candidate['sdpMid'],
           candidate['sdpMLineIndex'],
         );
-        await _peerConnection!.addCandidate(iceCandidate);
-        _logger.d('✅ ICE candidate added successfully');
+
+        // FIXED: Queue candidates if remote description isn't set yet
+        if (_peerConnection!.getRemoteDescription() != null) {
+          await _peerConnection!.addCandidate(iceCandidate);
+          _logger.d('✅ ICE candidate added successfully');
+        } else {
+          _pendingCandidates.add(iceCandidate);
+          _logger.d('📋 ICE candidate queued (waiting for remote description)');
+        }
+      } else {
+        _logger.w('⚠️ Invalid ICE candidate data structure');
       }
     } catch (e, stackTrace) {
-      _logger.e('❌ Failed to handle ICE candidate');
+      _logger.e('❌ Failed to handle ICE candidate: $e');
     }
   }
 
@@ -537,14 +648,17 @@ class WebRTCService extends ChangeNotifier {
     }
   }
 
-  /// Remote stream added handler
-  void _onAddStream(MediaStream stream) {
-    _logger.d('📺 Remote stream added');
+  /// FIXED: Handle remote tracks (replaces onAddStream for Unified Plan)
+  void _onTrack(RTCTrackEvent event) {
+    _logger.d('📺 Remote track received: ${event.track.kind}');
 
-    _remoteStream = stream;
-    remoteRenderer.srcObject = stream;
-    _remoteVideoController.add(remoteRenderer);
-    notifyListeners();
+    if (event.streams.isNotEmpty) {
+      _remoteStream = event.streams[0];
+      remoteRenderer.srcObject = _remoteStream;
+      _remoteVideoController.add(remoteRenderer);
+      notifyListeners();
+      _logger.d('✅ Remote stream set to renderer');
+    }
   }
 
   /// Remote stream removed handler
@@ -758,6 +872,9 @@ class WebRTCService extends ChangeNotifier {
       localRenderer.srcObject = null;
       remoteRenderer.srcObject = null;
 
+      // Clear pending candidates
+      _pendingCandidates.clear();
+
       // Reset state
       _currentRoomId = null;
       _currentUserId = null;
@@ -777,9 +894,7 @@ class WebRTCService extends ChangeNotifier {
     _logger.d('🗑️ Disposing WebRTC service...');
 
     // Cancel subscriptions
-    _offerSubscription?.cancel();
-    _answerSubscription?.cancel();
-    _iceCandidateSubscription?.cancel();
+    _signalingSubscription?.cancel();
 
     // Close controllers
     _localVideoController.close();

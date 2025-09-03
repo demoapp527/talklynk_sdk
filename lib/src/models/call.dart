@@ -36,7 +36,7 @@ class Call {
       callId: json['call_id'] ?? json['room_id'] ?? '',
       roomId: json['room_id'] ?? '',
       caller: User.fromJson(json['caller'] ?? {}),
-      callee: User.fromJson(json['callee'] ?? {}),
+      callee: User.fromJson(json['callee'] ?? json['accepted_by'] ?? {}),
       type: CallType.values.firstWhere(
         (e) => e.name == json['type'],
         orElse: () => CallType.video,

@@ -17,6 +17,7 @@ class Room {
   final DateTime? startedAt;
   final DateTime? endedAt;
   final Map<String, dynamic>? metadata;
+  final Map<String, dynamic>? settings;
 
   const Room({
     required this.id,
@@ -31,6 +32,7 @@ class Room {
     this.startedAt,
     this.endedAt,
     this.metadata,
+    this.settings,
   });
 
   factory Room.fromJson(Map<String, dynamic> json) {
@@ -47,7 +49,8 @@ class Room {
         orElse: () => RoomStatus.active,
       ),
       maxParticipants: json['max_participants'] ?? 10,
-      isOneToOne: json['is_one_to_one'] ?? false,
+      // Convert integer to boolean
+      isOneToOne: _convertToBool(json['is_one_to_one']),
       participants: (json['participants'] as List?)
               ?.map((p) => Participant.fromJson(p))
               .toList() ??
@@ -60,7 +63,16 @@ class Room {
       endedAt:
           json['ended_at'] != null ? DateTime.parse(json['ended_at']) : null,
       metadata: json['metadata'],
+      settings: json['settings'],
     );
+  }
+
+  // Helper method to convert various types to boolean
+  static bool _convertToBool(dynamic value) {
+    if (value is bool) return value;
+    if (value is int) return value != 0;
+    if (value is String) return value.toLowerCase() == 'true' || value == '1';
+    return false;
   }
 
   Map<String, dynamic> toJson() {
@@ -77,6 +89,7 @@ class Room {
       'started_at': startedAt?.toIso8601String(),
       'ended_at': endedAt?.toIso8601String(),
       'metadata': metadata,
+      'settings': settings,
     };
   }
 

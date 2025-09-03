@@ -167,7 +167,9 @@ class IncomingCallOverlay extends StatelessWidget {
   void _acceptCall(BuildContext context) {
     final currentUser = context.read<AuthProvider>().currentUser;
     if (currentUser != null) {
-      context.read<CallProvider>().acceptCall(currentUser.id);
+      context
+          .read<CallProvider>()
+          .acceptCall(currentUser.externalId ?? currentUser.id);
       onCallAccepted?.call();
     }
   }
@@ -175,7 +177,9 @@ class IncomingCallOverlay extends StatelessWidget {
   void _rejectCall(BuildContext context) {
     final currentUser = context.read<AuthProvider>().currentUser;
     if (currentUser != null) {
-      context.read<CallProvider>().rejectCall(currentUser.id);
+      context
+          .read<CallProvider>()
+          .rejectCall(currentUser.externalId ?? currentUser.id);
       onCallRejected?.call();
     }
   }

@@ -1,11 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:talklynk_sdk/src/providers/auth_provider.dart';
-import 'package:talklynk_sdk/src/providers/call_provider.dart';
-import 'package:talklynk_sdk/src/providers/event_provider.dart';
-import 'package:talklynk_sdk/src/providers/room_provider.dart';
-import 'package:talklynk_sdk/src/services/api_service.dart';
-import 'package:talklynk_sdk/src/services/websocket_service.dart';
+import 'package:talklynk_sdk/talklynk_sdk.dart';
 
 class TalkLynkSDK {
   static TalkLynkSDK? _instance;
@@ -19,6 +14,8 @@ class TalkLynkSDK {
   late final EventProvider _eventProvider;
 
   bool _initialized = false;
+
+  CallProvider? get callProvider => _callProvider;
 
   TalkLynkSDK._();
 
@@ -89,6 +86,14 @@ class TalkLynkSDK {
         ChangeNotifierProvider.value(value: _callProvider),
         ChangeNotifierProvider.value(value: _roomProvider),
         ChangeNotifierProvider.value(value: _eventProvider),
+        ChangeNotifierProvider(
+          create: (context) => WebRTCService(
+            apiService: TalkLynkSDK.instance.api,
+            webSocketService: TalkLynkSDK.instance.websocket,
+            baseUrl: TalkLynkSDK.instance.api.baseUrl,
+            enableLogs: true,
+          ),
+        ),
       ],
       child: app,
     );
